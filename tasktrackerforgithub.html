@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Tracker</title>
+    
+    <!-- Google Fonts: Roboto -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Supabase JS Client Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Roboto', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            DEFAULT: '#1B3664',
+                            light: '#2a5298',
+                            dark: '#0f2040'
+                        },
+                        accent: {
+                            DEFAULT: '#c7ac81',
+                            hover: '#b59868'
+                        }
+                    }
+                },
+            },
+        };
+    </script>
+    <style>
+        body { font-family: 'Roboto', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .modal-fade { transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out; }
+        .task-card-draggable { cursor: grab; user-select: none; -webkit-user-drag: element; touch-action: pan-y; }
+        .task-card-draggable:active { cursor: grabbing; }
+        .task-card-draggable.is-dragging { opacity: 0.35; transform: scale(0.97); border: 1px dashed #1B3664; }
+        .drop-column-active { background-color: #f8fafc !important; border-color: #c7ac81 !important; border-style: dashed !important; box-shadow: 0 0 0 2px rgba(199, 172, 129, 0.2); }
+        .drop-indicator-top { position: relative; }
+        .drop-indicator-top::before { content: ''; position: absolute; top: -6px; left: 0; right: 0; height: 3px; background-color: #1B3664; border-radius: 9999px; z-index: 20; }
+        .drop-indicator-bottom { position: relative; }
+        .drop-indicator-bottom::after { content: ''; position: absolute; bottom: -6px; left: 0; right: 0; height: 3px; background-color: #1B3664; border-radius: 9999px; z-index: 20; }
+        
+        /* Spinner animation */
+        .spinner { border: 3px solid rgba(199, 172, 129, 0.3); border-top-color: #c7ac81; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <!-- Global Loading Screen -->
+    <div id="global-loader" class="fixed inset-0 z-[100] bg-brand flex flex-col items-center justify-center transition-opacity duration-300">
+        <div class="spinner mb-4"></div>
+        <h2 class="text-accent font-medium tracking-widest uppercase text-sm">Authenticating...</h2>
+    </div>
+
+    <!-- Full Screen Auth UI -->
+    <div id="auth-screen" class="hidden fixed inset-0 z-50 flex flex-col md:flex-row bg-white">
+        <!-- Logo Side (White Background) -->
+        <div class="hidden md:flex md:w-1/2 bg-white flex-col justify-center items-center p-12 text-center relative overflow-hidden border-r border-slate-200">
+            <div class="relative z-10 flex flex-col items-center">
+                <img src="https://lh3.googleusercontent.com/d/1n_jdr1fbe3A_2xcvx1uetu7Eu35O0d2P" alt="Task Tracker Logo" class="w-auto h-80 mb-8">
+            </div>
+        </div>
+        
+        <!-- Form Side (Brand Dark Blue Background) -->
+        <div class="w-full md:w-1/2 flex flex-col justify-center px-8 sm:px-16 lg:px-24 bg-brand relative">
+            <div class="max-w-md w-full mx-auto">
+                <!-- Mobile Logo -->
+                <div class="md:hidden flex justify-center mb-8 bg-white p-4 rounded-xl shadow-lg">
+                    <img src="https://lh3.googleusercontent.com/d/1n_jdr1fbe3A_2xcvx1uetu7Eu35O0d2P" alt="Task Tracker Logo" class="h-16 w-auto">
+                </div>
+                
+                <h2 id="auth-title" class="text-3xl font-bold text-white mb-2">Welcome Back</h2>
+                <p id="auth-subtitle" class="text-sm text-slate-300 mb-8">Sign in to manage your tasks</p>
+
+                <form id="auth-form" onsubmit="handleAuthSubmit(event)" class="space-y-5">
+                    <div>
+                        <label class="block text-xs font-bold text-accent uppercase tracking-wider mb-1.5">Email Address</label>
+                        <input type="email" id="auth-email" required class="w-full px-4 py-3 rounded-lg border border-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent placeholder-slate-400 bg-white/10 text-white transition" placeholder="you@example.com">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-accent uppercase tracking-wider mb-1.5">Password</label>
+                        <input type="password" id="auth-password" required minlength="6" class="w-full px-4 py-3 rounded-lg border border-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent placeholder-slate-400 bg-white/10 text-white transition" placeholder="••••••••">
+                    </div>
+                    
+                    <div id="auth-error" class="hidden text-xs text-rose-200 bg-rose-900/50 p-3 rounded-lg border border-rose-800"></div>
+                    <div id="auth-success" class="hidden text-xs text-emerald-200 bg-emerald-900/50 p-3 rounded-lg border border-emerald-800"></div>
+
+                    <button type="submit" id="auth-submit-btn" class="w-full py-3 bg-accent hover:bg-accent-hover text-brand text-sm font-bold rounded-lg shadow-md transition duration-200 uppercase tracking-wide">Sign In</button>
+                </form>
+
+                <div class="mt-8 text-center text-sm text-slate-300">
+                    <span id="auth-toggle-text">Don't have an account?</span>
+                    <button type="button" onclick="toggleAuthMode()" id="auth-toggle-btn" class="font-bold text-white hover:text-accent ml-1 transition">Sign Up</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application Shell -->
+    <div id="app-shell" class="hidden flex-col min-h-screen">
+        
+        <!-- Header with Custom Logo -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+                <div class="flex items-center">
+                    <!-- Updated Logo Placement -->
+                    <img src="https://lh3.googleusercontent.com/d/1n_jdr1fbe3A_2xcvx1uetu7Eu35O0d2P" alt="Task Tracker Logo" class="h-14 w-auto">
+                </div>
+                <div class="flex items-center gap-3">
+                    <nav class="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
+                        <button type="button" id="tab-btn-board" onclick="switchPage('board')" class="px-4 py-1.5 text-xs font-bold rounded-md transition shadow-sm bg-white text-brand">To Do</button>
+                        <button type="button" id="tab-btn-done" onclick="switchPage('done')" class="px-4 py-1.5 text-xs font-bold rounded-md transition text-slate-500 hover:text-brand">Done</button>
+                    </nav>
+                    <div class="hidden sm:flex items-center gap-2">
+                        <span id="active-total-counter" class="text-xs font-bold px-3 py-1 rounded-full bg-brand/5 text-brand border border-brand/10">0 Active</span>
+                        <span id="done-total-counter" class="text-xs font-bold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">0 Done</span>
+                    </div>
+                    <!-- User Profile & Sign Out -->
+                    <div id="user-profile" class="flex items-center gap-3 pl-3 border-l border-slate-200 ml-1">
+                        <span id="user-email" class="text-xs font-medium text-slate-500 hidden md:inline"></span>
+                        <button onclick="handleSignOut()" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 hover:bg-slate-200 text-brand transition border border-slate-200">Sign Out</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Page View: Active Board -->
+        <main id="page-board" class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+            <section class="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-slate-200">
+                <div class="text-xs font-bold uppercase tracking-wider text-accent mb-3">Add New Task</div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <div class="flex-1">
+                        <input type="text" id="new-task-title" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand placeholder-slate-400" placeholder="What do you need to accomplish?">
+                    </div>
+                    <div class="w-full sm:w-48">
+                        <select id="new-task-category" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand bg-white font-medium text-brand">
+                            <option value="Top Priorities">Top Priorities</option>
+                            <option value="To Do" selected>To Do</option>
+                            <option value="On Hold">On Hold</option>
+                        </select>
+                    </div>
+                    <button onclick="addTask()" class="px-6 py-2.5 bg-brand hover:bg-brand-light text-white text-sm font-bold rounded-lg shadow-md transition duration-200 uppercase tracking-wide">Create</button>
+                </div>
+            </section>
+
+            <section class="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div class="relative flex-1">
+                        <input type="text" id="search-input" class="w-full pl-3.5 pr-14 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand placeholder-slate-400" placeholder="Search tasks by title, contact, link, or note..." oninput="renderTasks()">
+                        <button id="clear-search-btn" onclick="clearSearch('search-input')" class="hidden absolute inset-y-0 right-0 pr-4 flex items-center text-xs font-bold text-slate-400 hover:text-brand transition">CLEAR</button>
+                    </div>
+                    <div class="flex items-center gap-4 text-sm text-brand font-medium self-end md:self-auto bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                        <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" id="search-done-toggle" class="rounded border-slate-300 text-brand focus:ring-brand h-4 w-4 transition" onchange="renderTasks()">
+                            <span class="text-xs">Include completed in search</span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Board Columns -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                
+                <!-- Top Priorities -->
+                <div id="column-box-Top Priorities" data-drop-category="Top Priorities" class="category-drop-zone bg-white border border-slate-200 rounded-xl p-4 flex flex-col min-h-[400px] shadow-sm transition-all duration-150 relative">
+                    <div class="pb-3 border-b border-slate-100 mb-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-sm bg-brand"></span>
+                                <h2 class="font-bold text-brand uppercase tracking-wide text-xs">Top Priorities</h2>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <!-- Sort Button -->
+                                <button id="sort-btn-Top Priorities" onclick="toggleSort('Top Priorities')" class="p-1.5 rounded-md text-slate-400 hover:text-accent hover:bg-slate-50 transition border border-transparent flex items-center gap-1" title="Sort by Due Date">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path></svg>
+                                </button>
+                                <span id="count-top" class="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="col-Top Priorities" class="space-y-3 flex-1 min-h-[120px]"></div>
+                </div>
+
+                <!-- To Do -->
+                <div id="column-box-To Do" data-drop-category="To Do" class="category-drop-zone bg-white border border-slate-200 rounded-xl p-4 flex flex-col min-h-[400px] shadow-sm transition-all duration-150 relative">
+                    <div class="pb-3 border-b border-slate-100 mb-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-sm bg-brand-light"></span>
+                                <h2 class="font-bold text-brand uppercase tracking-wide text-xs">To Do</h2>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button id="sort-btn-To Do" onclick="toggleSort('To Do')" class="p-1.5 rounded-md text-slate-400 hover:text-accent hover:bg-slate-50 transition border border-transparent flex items-center gap-1" title="Sort by Due Date">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path></svg>
+                                </button>
+                                <span id="count-todo" class="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="col-To Do" class="space-y-3 flex-1 min-h-[120px]"></div>
+                </div>
+
+                <!-- On Hold -->
+                <div id="column-box-On Hold" data-drop-category="On Hold" class="category-drop-zone bg-white border border-slate-200 rounded-xl p-4 flex flex-col min-h-[400px] shadow-sm transition-all duration-150 relative">
+                    <div class="pb-3 border-b border-slate-100 mb-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-sm bg-accent"></span>
+                                <h2 class="font-bold text-brand uppercase tracking-wide text-xs">On Hold</h2>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <button id="sort-btn-On Hold" onclick="toggleSort('On Hold')" class="p-1.5 rounded-md text-slate-400 hover:text-accent hover:bg-slate-50 transition border border-transparent flex items-center gap-1" title="Sort by Due Date">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path></svg>
+                                </button>
+                                <span id="count-hold" class="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="col-On Hold" class="space-y-3 flex-1 min-h-[120px]"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Page View: Dedicated Marked as Done View -->
+        <main id="page-done" class="hidden flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+            <section class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="w-3 h-3 rounded-sm bg-emerald-500"></span>
+                        <h2 class="text-lg font-bold text-brand">Completed Tasks</h2>
+                        <span id="page-count-done-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">0 Items</span>
+                    </div>
+                    <p class="text-xs text-slate-500 font-medium">Review, search, restore, or delete finished work.</p>
+                </div>
+                <div class="relative w-full md:w-80">
+                    <input type="text" id="search-done-input" class="w-full pl-3.5 pr-14 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 placeholder-slate-400" placeholder="Search completed tasks..." oninput="renderTasks()">
+                    <button id="clear-done-search-btn" onclick="clearSearch('search-done-input')" class="hidden absolute inset-y-0 right-0 pr-4 flex items-center text-xs font-bold text-slate-400 hover:text-emerald-600 transition">CLEAR</button>
+                </div>
+            </section>
+
+            <section class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm min-h-[400px]">
+                <div id="done-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                <div id="done-empty-state" class="hidden py-24 text-center text-sm font-medium text-slate-400">No tasks marked as done yet.</div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Task Details Modal -->
+    <div id="task-modal" class="modal-fade fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-200">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-white">
+                <div class="flex items-center gap-3">
+                    <span class="text-xs font-bold tracking-widest uppercase text-brand">Task Details</span>
+                    <span id="modal-status-badge" class="text-xs px-2.5 py-0.5 rounded font-bold uppercase tracking-wide"></span>
+                </div>
+                <button onclick="closeModal()" class="text-xs font-bold text-slate-400 hover:text-brand p-1 transition" title="Close dialog">CLOSE</button>
+            </div>
+            <div class="p-6 space-y-5 overflow-y-auto bg-slate-50/50">
+                <input type="hidden" id="modal-task-id">
+                <div>
+                    <label class="block text-xs font-bold text-brand uppercase tracking-wider mb-1.5">Task Title</label>
+                    <input type="text" id="modal-title" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-brand outline-none shadow-sm bg-white font-medium text-slate-800">
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-xs font-bold text-brand uppercase tracking-wider mb-1.5">Category</label>
+                        <select id="modal-category" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-brand bg-white outline-none shadow-sm font-medium text-slate-800">
+                            <option value="Top Priorities">Top Priorities</option>
+                            <option value="To Do">To Do</option>
+                            <option value="On Hold">On Hold</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-brand uppercase tracking-wider mb-1.5">Status</label>
+                        <button type="button" id="modal-toggle-done-btn" onclick="toggleDoneFromModal()" class="w-full px-4 py-2.5 rounded-lg border text-sm font-bold transition text-center shadow-sm uppercase tracking-wide"></button>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="block text-xs font-bold text-brand uppercase tracking-wider">Due Date</label>
+                        <button type="button" onclick="clearDueDateModal()" class="text-[10px] text-slate-400 hover:text-brand font-bold tracking-wide">CLEAR DATE</button>
+                    </div>
+                    <input type="date" id="modal-due-date" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-brand outline-none bg-white shadow-sm font-medium text-slate-800">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-brand uppercase tracking-wider mb-1.5">Relevant People & Emails</label>
+                    <input type="text" id="modal-emails" placeholder="John Doe (john@example.com)" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-brand outline-none shadow-sm bg-white">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-brand uppercase tracking-wider mb-1.5">Relevant Links</label>
+                    <textarea id="modal-links" rows="2" placeholder="https://docs.google.com/..." class="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-brand outline-none shadow-sm bg-white leading-relaxed"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-brand uppercase tracking-wider mb-1.5">Notes & Details</label>
+                    <textarea id="modal-notes" rows="3" placeholder="Add context, specifications..." class="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-brand outline-none shadow-sm bg-white leading-relaxed"></textarea>
+                </div>
+            </div>
+            <div class="px-6 py-4 bg-white border-t border-slate-100 flex items-center justify-between">
+                <button type="button" onclick="deleteTaskFromModal()" class="px-4 py-2 text-xs font-bold text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition">Delete Task</button>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="closeModal()" class="px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition uppercase tracking-wide">Cancel</button>
+                    <button type="button" onclick="saveModalChanges()" class="px-6 py-2.5 text-xs font-bold bg-brand hover:bg-brand-light text-white rounded-lg transition shadow-md uppercase tracking-wide">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="confirm-delete-modal" class="modal-fade fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-200">
+        <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col p-6">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="px-2.5 py-1 rounded bg-rose-100 text-rose-700 text-xs font-bold uppercase tracking-wider">CONFIRM</div>
+                <h3 class="text-lg font-bold text-brand leading-tight">Delete Task?</h3>
+            </div>
+            <p class="text-sm text-slate-600 mb-6 font-medium">Are you sure you want to permanently remove <span id="confirm-delete-task-title" class="font-bold text-brand break-words"></span>? This action cannot be undone.</p>
+            <div class="flex items-center justify-end gap-3">
+                <button type="button" onclick="closeConfirmDeleteModal()" class="px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg transition uppercase tracking-wide">Cancel</button>
+                <button type="button" onclick="executeConfirmedDelete()" class="px-5 py-2.5 text-xs font-bold bg-rose-500 hover:bg-rose-600 text-white rounded-lg transition shadow-md uppercase tracking-wide">Yes, Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. SUPABASE INITIALIZATION
+        // ==========================================
+        const SUPABASE_URL = 'https://uvfwmgkqbzujagkpahbd.supabase.co'; 
+        const SUPABASE_ANON_KEY = 'sb_publishable_fkyc0WfY3rS1Chn1L88XMw_jggOxQYP';
+        
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // ==========================================
+        // 2. STATE VARIABLES
+        // ==========================================
+        let tasks = [];
+        let currentPage = 'board';
+        let draggedTaskId = null;
+        let isDraggingTask = false;
+        let pendingDeleteTaskId = null;
+        let isSignUpMode = false;
+        let currentUser = null;
+
+        // Sorting state (false = default order, true = sort by due date)
+        let columnSortState = { "Top Priorities": false, "To Do": false, "On Hold": false };
+
+        // ==========================================
+        // 3. AUTHENTICATION FUNCTIONS
+        // ==========================================
+        function toggleAuthMode() {
+            isSignUpMode = !isSignUpMode;
+            document.getElementById('auth-title').innerText = isSignUpMode ? "Create Account" : "Welcome Back";
+            document.getElementById('auth-subtitle').innerText = isSignUpMode ? "Sign up to start organizing tasks" : "Sign in to manage your tasks";
+            document.getElementById('auth-submit-btn').innerText = isSignUpMode ? "Sign Up" : "Sign In";
+            document.getElementById('auth-toggle-text').innerText = isSignUpMode ? "Already have an account?" : "Don't have an account?";
+            document.getElementById('auth-toggle-btn').innerText = isSignUpMode ? "Sign In" : "Sign Up";
+            hideAuthMessages();
+        }
+
+        function hideAuthMessages() {
+            document.getElementById('auth-error').classList.add('hidden');
+            document.getElementById('auth-success').classList.add('hidden');
+        }
+
+        async function handleAuthSubmit(e) {
+            e.preventDefault();
+            hideAuthMessages();
+
+            const email = document.getElementById('auth-email').value.trim();
+            const password = document.getElementById('auth-password').value.trim();
+            const submitBtn = document.getElementById('auth-submit-btn');
+
+            submitBtn.disabled = true;
+            submitBtn.innerText = "Processing...";
+
+            if (isSignUpMode) {
+                const { error } = await supabaseClient.auth.signUp({ email, password });
+                if (error) showAuthError(error.message);
+                else showAuthSuccess("Account created! Check your email to confirm registration or sign in directly.");
+            } else {
+                const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (error) showAuthError(error.message);
+            }
+
+            submitBtn.disabled = false;
+            submitBtn.innerText = isSignUpMode ? "Sign Up" : "Sign In";
+        }
+
+        function showAuthError(msg) {
+            const errEl = document.getElementById('auth-error');
+            errEl.innerText = msg;
+            errEl.classList.remove('hidden');
+        }
+
+        function showAuthSuccess(msg) {
+            const succEl = document.getElementById('auth-success');
+            succEl.innerText = msg;
+            succEl.classList.remove('hidden');
+        }
+
+        async function handleSignOut() {
+            await supabaseClient.auth.signOut();
+        }
+
+        // ==========================================
+        // 4. DATABASE FUNCTIONS (CRUD)
+        // ==========================================
+        async function fetchTasksFromSupabase() {
+            if (!currentUser) return;
+
+            const { data, error } = await supabaseClient
+                .from('tasks')
+                .select('*')
+                .order('id', { ascending: false });
+
+            if (error) {
+                console.error('Error fetching tasks:', error.message);
+                return;
+            }
+
+            tasks = data.map(t => ({
+                id: t.id,
+                title: t.title,
+                category: t.category,
+                isDone: t.is_done,
+                dueDate: t.due_date || '',
+                emails: t.emails || '',
+                links: t.links || '',
+                notes: t.notes || ''
+            }));
+            renderTasks();
+        }
+
+        async function addTask() {
+            const titleInput = document.getElementById('new-task-title');
+            const categorySelect = document.getElementById('new-task-category');
+            const title = titleInput.value.trim();
+
+            if (!title) {
+                titleInput.focus();
+                return;
+            }
+
+            const { error } = await supabaseClient.from('tasks').insert([{
+                title: title,
+                category: categorySelect.value,
+                is_done: false,
+                due_date: '',
+                emails: '',
+                links: '',
+                notes: '',
+                user_id: currentUser.id
+            }]);
+
+            if (error) {
+                alert('Failed to save task: ' + error.message);
+                return;
+            }
+
+            titleInput.value = '';
+            fetchTasksFromSupabase();
+        }
+
+        async function toggleTaskStatus(taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            await supabaseClient.from('tasks').update({ is_done: !task.isDone }).eq('id', taskId);
+            
+            const modalId = document.getElementById('modal-task-id').value;
+            if (modalId && Number(modalId) === taskId) {
+                updateModalStatusDisplay({ ...task, isDone: !task.isDone });
+            }
+            fetchTasksFromSupabase();
+        }
+
+        async function saveModalChanges() {
+            const id = Number(document.getElementById('modal-task-id').value);
+            const task = tasks.find(t => t.id === id);
+
+            if (task) {
+                const newTitle = document.getElementById('modal-title').value.trim();
+                await supabaseClient.from('tasks').update({
+                    title: newTitle || task.title,
+                    category: document.getElementById('modal-category').value,
+                    due_date: document.getElementById('modal-due-date').value,
+                    emails: document.getElementById('modal-emails').value.trim(),
+                    links: document.getElementById('modal-links').value.trim(),
+                    notes: document.getElementById('modal-notes').value.trim()
+                }).eq('id', id);
+            }
+            closeModal();
+            fetchTasksFromSupabase();
+        }
+
+        async function executeConfirmedDelete() {
+            if (!pendingDeleteTaskId) return;
+            await supabaseClient.from('tasks').delete().eq('id', pendingDeleteTaskId);
+            
+            const modalId = Number(document.getElementById('modal-task-id').value);
+            if (modalId === pendingDeleteTaskId) closeModal();
+            
+            closeConfirmDeleteModal();
+            fetchTasksFromSupabase();
+        }
+
+        async function reorderTaskRelativeTo(draggedId, targetId, insertAfter) {
+            const targetTask = tasks.find(t => t.id === Number(targetId));
+            if (!targetTask) return;
+
+            await supabaseClient.from('tasks').update({ category: targetTask.category, is_done: false }).eq('id', draggedId);
+            fetchTasksFromSupabase();
+        }
+
+        async function moveTaskToCategoryEnd(taskId, targetCategory) {
+            await supabaseClient.from('tasks').update({ category: targetCategory, is_done: false }).eq('id', taskId);
+            fetchTasksFromSupabase();
+        }
+
+        async function markTaskDoneFromDrop(taskId) {
+            await supabaseClient.from('tasks').update({ is_done: true }).eq('id', taskId);
+            fetchTasksFromSupabase();
+        }
+
+        // ==========================================
+        // 5. UI RENDERING, SORTING, & LOGIC
+        // ==========================================
+        function toggleSort(category) {
+            columnSortState[category] = !columnSortState[category];
+            const btn = document.getElementById(`sort-btn-${category}`);
+            if (columnSortState[category]) {
+                btn.classList.add('text-accent', 'bg-accent/10', 'border-accent/30');
+                btn.classList.remove('text-slate-400', 'border-transparent');
+            } else {
+                btn.classList.remove('text-accent', 'bg-accent/10', 'border-accent/30');
+                btn.classList.add('text-slate-400', 'border-transparent');
+            }
+            renderTasks();
+        }
+
+        function switchPage(page) {
+            currentPage = page;
+            document.getElementById('page-board').classList.toggle('hidden', page !== 'board');
+            document.getElementById('page-done').classList.toggle('hidden', page !== 'done');
+            document.getElementById('tab-btn-board').className = page === 'board' ? 'px-4 py-1.5 text-xs font-bold rounded-md transition shadow-sm bg-white text-brand' : 'px-4 py-1.5 text-xs font-bold rounded-md transition text-slate-500 hover:text-brand';
+            document.getElementById('tab-btn-done').className = page === 'done' ? 'px-4 py-1.5 text-xs font-bold rounded-md transition shadow-sm bg-white text-brand' : 'px-4 py-1.5 text-xs font-bold rounded-md transition text-slate-500 hover:text-brand';
+            renderTasks();
+        }
+
+        function renderTasks() {
+            const globalSearch = document.getElementById('search-input').value.trim().toLowerCase();
+            const doneSearch = document.getElementById('search-done-input').value.trim().toLowerCase();
+            const includeDoneInGlobalSearch = document.getElementById('search-done-toggle').checked;
+
+            toggleClearBtn('search-input', 'clear-search-btn');
+            toggleClearBtn('search-done-input', 'clear-done-search-btn');
+
+            const categories = ["Top Priorities", "To Do", "On Hold"];
+            
+            // Clear existing elements
+            categories.forEach(cat => {
+                const colEl = document.getElementById(`col-${cat}`);
+                if (colEl) colEl.innerHTML = '';
+            });
+            const doneListEl = document.getElementById('done-list');
+            if (doneListEl) doneListEl.innerHTML = '';
+
+            let counts = { "Top Priorities": 0, "To Do": 0, "On Hold": 0, "Active": 0, "Done": 0 };
+            
+            // Temporary storage for sorting
+            let colTasks = { "Top Priorities": [], "To Do": [], "On Hold": [] };
+
+            tasks.forEach(task => {
+                if (task.isDone) counts["Done"]++; else counts["Active"]++;
+
+                const dateFormatted = task.dueDate ? formatDateForSearch(task.dueDate) : '';
+                const matchesGlobalSearch = globalSearch === '' || task.title.toLowerCase().includes(globalSearch) || (task.emails && task.emails.toLowerCase().includes(globalSearch)) || (task.notes && task.notes.toLowerCase().includes(globalSearch)) || task.category.toLowerCase().includes(globalSearch) || dateFormatted.includes(globalSearch);
+                const matchesDoneSearch = doneSearch === '' || task.title.toLowerCase().includes(doneSearch) || (task.emails && task.emails.toLowerCase().includes(doneSearch)) || (task.notes && task.notes.toLowerCase().includes(doneSearch)) || task.category.toLowerCase().includes(doneSearch) || dateFormatted.includes(doneSearch);
+
+                if (!task.isDone && matchesGlobalSearch) {
+                    if(colTasks[task.category]) colTasks[task.category].push(task);
+                }
+
+                if (task.isDone) {
+                    if (currentPage === 'done' && matchesDoneSearch) doneListEl.appendChild(createDoneTaskCard(task));
+                    else if (currentPage === 'board' && includeDoneInGlobalSearch && matchesGlobalSearch) doneListEl.appendChild(createDoneTaskCard(task));
+                }
+            });
+
+            // Process, Sort, and Append Category Columns
+            categories.forEach(cat => {
+                const col = document.getElementById(`col-${cat}`);
+                if (col) {
+                    // Sorting Logic
+                    if (columnSortState[cat]) {
+                        colTasks[cat].sort((a, b) => {
+                            if (!a.dueDate && !b.dueDate) return b.id - a.id; // Both null, sort by ID descending
+                            if (!a.dueDate) return 1; // null due dates go to bottom
+                            if (!b.dueDate) return -1;
+                            return new Date(a.dueDate) - new Date(b.dueDate); // Chronological
+                        });
+                    } else {
+                        // Default sorting (by id descending / newest first)
+                        colTasks[cat].sort((a, b) => b.id - a.id);
+                    }
+
+                    colTasks[cat].forEach(task => {
+                        counts[cat]++;
+                        col.appendChild(createActiveTaskCard(task));
+                    });
+                }
+            });
+
+            // Update Counters
+            setInnerText('count-top', counts["Top Priorities"]);
+            setInnerText('count-todo', counts["To Do"]);
+            setInnerText('count-hold', counts["On Hold"]);
+            setInnerText('active-total-counter', `${counts["Active"]} Active`);
+            setInnerText('done-total-counter', `${counts["Done"]} Done`);
+            setInnerText('page-count-done-badge', `${counts["Done"]} Total`);
+
+            // Empty States
+            categories.forEach(cat => {
+                const col = document.getElementById(`col-${cat}`);
+                if (col && col.children.length === 0) col.innerHTML = `<div class="h-28 flex flex-col items-center justify-center text-xs text-slate-300 font-medium border border-dashed border-slate-200 rounded-lg">No active tasks</div>`;
+            });
+
+            const doneEmptyState = document.getElementById('done-empty-state');
+            if (doneEmptyState && doneListEl) {
+                doneEmptyState.classList.toggle('hidden', doneListEl.children.length > 0);
+                doneEmptyState.innerText = doneSearch !== '' ? "No completed tasks match your search filter." : "No tasks marked as done yet.";
+            }
+        }
+
+        function createActiveTaskCard(task) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-lg p-3.5 border border-slate-200 shadow-sm hover:shadow-md hover:border-accent/60 transition group task-card-draggable';
+            card.setAttribute('draggable', 'true');
+            card.dataset.taskId = task.id;
+
+            card.addEventListener('dragstart', (e) => { draggedTaskId = task.id; isDraggingTask = true; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(task.id)); setTimeout(() => card.classList.add('is-dragging'), 0); });
+            card.addEventListener('dragend', () => { draggedTaskId = null; card.classList.remove('is-dragging'); clearDropHighlights(); setTimeout(() => isDraggingTask = false, 50); });
+            card.addEventListener('dragover', (e) => { if (!draggedTaskId || draggedTaskId === task.id) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; const rect = card.getBoundingClientRect(); if (e.clientY < rect.top + rect.height / 2) { card.classList.add('drop-indicator-top'); card.classList.remove('drop-indicator-bottom'); } else { card.classList.add('drop-indicator-bottom'); card.classList.remove('drop-indicator-top'); } });
+            card.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove('drop-indicator-top', 'drop-indicator-bottom'); });
+            card.addEventListener('drop', (e) => { if (!draggedTaskId || draggedTaskId === task.id) return; e.preventDefault(); e.stopPropagation(); const rect = card.getBoundingClientRect(); clearDropHighlights(); reorderTaskRelativeTo(draggedTaskId, task.id, e.clientY >= (rect.top + rect.height / 2)); });
+            card.onclick = (e) => { if (!isDraggingTask && !e.target.closest('.action-stop-propagation')) openModal(task.id); };
+
+            const emailCount = task.emails ? task.emails.split(',').filter(e => e.trim().length > 0).length : 0;
+            const linkCount = task.links ? task.links.split('\n').filter(l => l.trim().length > 0).length : 0;
+
+            card.innerHTML = `
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <div class="flex items-start gap-2 flex-1">
+                        <span class="mt-1 text-slate-300 group-hover:text-accent transition cursor-grab" title="Drag to reorder"><span class="text-xs tracking-tighter">⋮⋮</span></span>
+                        <div class="font-bold text-sm text-brand leading-snug group-hover:text-brand-light transition">${escapeHtml(task.title)}</div>
+                    </div>
+                    <button type="button" onclick="toggleTaskStatus(${task.id})" class="action-stop-propagation shrink-0 p-1 rounded-md text-slate-300 hover:text-white hover:bg-brand border border-slate-200 hover:border-brand transition"><span class="text-xs font-bold px-0.5">✓</span></button>
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 pt-1 border-t border-slate-50">
+                    ${task.dueDate ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-brand/5 text-brand font-bold border border-brand/10">Due: ${formatDateDisplay(task.dueDate)}</span>` : ''}
+                    ${emailCount > 0 ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 font-bold text-slate-500">${emailCount} contact(s)</span>` : ''}
+                    ${linkCount > 0 ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 font-bold text-slate-500">${linkCount} link(s)</span>` : ''}
+                    ${task.notes ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 font-bold text-slate-500">Notes</span>` : ''}
+                </div>
+            `;
+            return card;
+        }
+
+        function createDoneTaskCard(task) {
+            const card = document.createElement('div');
+            card.className = 'bg-slate-50 rounded-lg p-3.5 border border-slate-200 hover:border-brand/40 transition flex flex-col justify-between group task-card-draggable';
+            card.setAttribute('draggable', 'true');
+            card.dataset.taskId = task.id;
+
+            card.addEventListener('dragstart', (e) => { draggedTaskId = task.id; isDraggingTask = true; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(task.id)); setTimeout(() => card.classList.add('is-dragging'), 0); });
+            card.addEventListener('dragend', () => { draggedTaskId = null; card.classList.remove('is-dragging'); clearDropHighlights(); setTimeout(() => isDraggingTask = false, 50); });
+            card.onclick = (e) => { if (!isDraggingTask && !e.target.closest('.action-stop-propagation')) openModal(task.id); };
+
+            card.innerHTML = `
+                <div>
+                    <div class="flex items-start justify-between gap-2 mb-1.5">
+                        <div class="flex items-start gap-2">
+                            <span class="mt-1 text-slate-300 group-hover:text-slate-400 transition cursor-grab"><span class="text-xs tracking-tighter">⋮⋮</span></span>
+                            <span class="line-through text-slate-500 font-bold text-sm group-hover:text-brand transition leading-snug">${escapeHtml(task.title)}</span>
+                        </div>
+                        <span class="text-[9px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 shrink-0">Done</span>
+                    </div>
+                    <div class="text-[11px] text-slate-400 mb-2 pl-5 space-y-0.5">
+                        <div>Original Category: <span class="text-slate-600 font-bold">${escapeHtml(task.category)}</span></div>
+                        ${task.dueDate ? `<div class="text-brand/70 font-bold">Was Due: ${formatDateDisplay(task.dueDate)}</div>` : ''}
+                    </div>
+                </div>
+                <div class="flex items-center justify-between pt-2 border-t border-slate-200/80 mt-1 pl-5">
+                    <button type="button" onclick="toggleTaskStatus(${task.id})" class="action-stop-propagation text-xs text-brand hover:text-accent font-bold uppercase tracking-wide transition">Restore</button>
+                    <button type="button" onclick="deleteTaskById(${task.id})" class="action-stop-propagation text-xs text-rose-500 hover:text-rose-700 font-bold uppercase tracking-wide transition">Delete</button>
+                </div>
+            `;
+            return card;
+        }
+
+        function clearSearch(inputId) {
+            const el = document.getElementById(inputId);
+            if (el) { el.value = ''; renderTasks(); el.focus(); }
+        }
+
+        function toggleClearBtn(inputId, btnId) {
+            const input = document.getElementById(inputId);
+            const btn = document.getElementById(btnId);
+            if (input && btn) btn.classList.toggle('hidden', input.value.trim().length === 0);
+        }
+
+        function openModal(taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) return;
+            document.getElementById('modal-task-id').value = task.id;
+            document.getElementById('modal-title').value = task.title;
+            document.getElementById('modal-category').value = task.category;
+            document.getElementById('modal-due-date').value = task.dueDate || '';
+            document.getElementById('modal-emails').value = task.emails || '';
+            document.getElementById('modal-links').value = task.links || '';
+            document.getElementById('modal-notes').value = task.notes || '';
+            updateModalStatusDisplay(task);
+            const modal = document.getElementById('task-modal');
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modal.classList.add('opacity-100', 'pointer-events-auto');
+        }
+
+        function clearDueDateModal() { document.getElementById('modal-due-date').value = ''; }
+
+        function updateModalStatusDisplay(task) {
+            const statusBadge = document.getElementById('modal-status-badge');
+            const toggleBtn = document.getElementById('modal-toggle-done-btn');
+            if (task.isDone) {
+                statusBadge.className = 'text-[10px] px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-bold uppercase tracking-widest';
+                statusBadge.innerText = 'Marked as Done';
+                toggleBtn.className = 'w-full px-4 py-2.5 rounded-lg border border-brand/20 text-brand bg-brand/5 hover:bg-brand/10 text-sm font-bold transition text-center uppercase tracking-wide shadow-sm';
+                toggleBtn.innerText = 'Restore to Active';
+            } else {
+                statusBadge.className = 'text-[10px] px-2.5 py-1 rounded bg-brand/10 text-brand font-bold uppercase tracking-widest';
+                statusBadge.innerText = 'Active Task';
+                toggleBtn.className = 'w-full px-4 py-2.5 rounded-lg border border-transparent text-white bg-emerald-500 hover:bg-emerald-600 text-sm font-bold transition text-center uppercase tracking-wide shadow-sm';
+                toggleBtn.innerText = 'Mark as Done';
+            }
+        }
+
+        function toggleDoneFromModal() {
+            const id = Number(document.getElementById('modal-task-id').value);
+            toggleTaskStatus(id);
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('task-modal');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.classList.remove('opacity-100', 'pointer-events-auto');
+        }
+
+        function requestDelete(taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) return;
+            pendingDeleteTaskId = taskId;
+            setInnerText('confirm-delete-task-title', `"${task.title}"`);
+            const confirmModal = document.getElementById('confirm-delete-modal');
+            confirmModal.classList.remove('opacity-0', 'pointer-events-none');
+            confirmModal.classList.add('opacity-100', 'pointer-events-auto');
+        }
+
+        function closeConfirmDeleteModal() {
+            pendingDeleteTaskId = null;
+            const confirmModal = document.getElementById('confirm-delete-modal');
+            confirmModal.classList.add('opacity-0', 'pointer-events-none');
+            confirmModal.classList.remove('opacity-100', 'pointer-events-auto');
+        }
+
+        function deleteTaskFromModal() { requestDelete(Number(document.getElementById('modal-task-id').value)); }
+        function deleteTaskById(taskId) { requestDelete(taskId); }
+
+        function clearDropHighlights() {
+            document.querySelectorAll('.category-drop-zone').forEach(zone => zone.classList.remove('drop-column-active'));
+            document.querySelectorAll('.drop-indicator-top, .drop-indicator-bottom').forEach(el => el.classList.remove('drop-indicator-top', 'drop-indicator-bottom'));
+        }
+
+        function initDragAndDrop() {
+            const categories = ["Top Priorities", "To Do", "On Hold"];
+            categories.forEach(category => {
+                const columnBox = document.getElementById(`column-box-${category}`);
+                if (!columnBox) return;
+                columnBox.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; columnBox.classList.add('drop-column-active'); });
+                columnBox.addEventListener('dragleave', (e) => { if (!columnBox.contains(e.relatedTarget)) columnBox.classList.remove('drop-column-active'); });
+                columnBox.addEventListener('drop', (e) => {
+                    e.preventDefault(); columnBox.classList.remove('drop-column-active'); clearDropHighlights();
+                    const taskId = draggedTaskId || Number(e.dataTransfer.getData('text/plain'));
+                    if (taskId) moveTaskToCategoryEnd(taskId, category);
+                });
+            });
+
+            const doneTabBtn = document.getElementById('tab-btn-done');
+            if (doneTabBtn) {
+                doneTabBtn.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+                doneTabBtn.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const taskId = draggedTaskId || Number(e.dataTransfer.getData('text/plain'));
+                    if (taskId) markTaskDoneFromDrop(taskId);
+                });
+            }
+        }
+
+        function setInnerText(id, text) { const el = document.getElementById(id); if (el) el.innerText = text; }
+        function escapeHtml(text) { return !text ? '' : text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;"); }
+        function formatDateDisplay(dateStr) {
+            if (!dateStr) return '';
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return dateStr;
+            return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        function formatDateForSearch(dateStr) { return formatDateDisplay(dateStr).toLowerCase(); }
+
+        document.getElementById('new-task-title').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addTask(); } });
+        document.getElementById('task-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+        document.getElementById('confirm-delete-modal').addEventListener('click', function(e) { if (e.target === this) closeConfirmDeleteModal(); });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const confirmModal = document.getElementById('confirm-delete-modal');
+                if (confirmModal && !confirmModal.classList.contains('pointer-events-none')) closeConfirmDeleteModal();
+                else closeModal();
+            }
+        });
+
+        // ==========================================
+        // 6. INITIALIZATION & SESSION MANAGEMENT
+        // ==========================================
+        window.addEventListener('DOMContentLoaded', async () => {
+            initDragAndDrop();
+
+            // Prevent UI flashing by checking session before revealing the app shell or login screen
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const appShell = document.getElementById('app-shell');
+            const authScreen = document.getElementById('auth-screen');
+            const globalLoader = document.getElementById('global-loader');
+
+            if (session && session.user) {
+                currentUser = session.user;
+                document.getElementById('user-email').innerText = currentUser.email;
+                appShell.classList.remove('hidden');
+                fetchTasksFromSupabase();
+            } else {
+                authScreen.classList.remove('hidden');
+            }
+
+            // Hide the global loading spinner once initial check is done
+            globalLoader.classList.add('opacity-0', 'pointer-events-none');
+            setTimeout(() => globalLoader.classList.add('hidden'), 300);
+
+            // Listen for login / logout state changes (triggered by user actions)
+            supabaseClient.auth.onAuthStateChange((event, session) => {
+                if (session && session.user) {
+                    currentUser = session.user;
+                    authScreen.classList.add('hidden');
+                    appShell.classList.remove('hidden');
+                    document.getElementById('user-email').innerText = currentUser.email;
+                    fetchTasksFromSupabase();
+                } else {
+                    currentUser = null;
+                    tasks = [];
+                    renderTasks();
+                    appShell.classList.add('hidden');
+                    authScreen.classList.remove('hidden');
+                }
+            });
+
+            // Enable real-time sync
+            supabaseClient
+                .channel('tasks-channel')
+                .on(
+                    'postgres_changes', 
+                    { event: '*', schema: 'public', table: 'tasks' }, 
+                    (payload) => {
+                        if (currentUser) fetchTasksFromSupabase();
+                    }
+                )
+                .subscribe();
+        });
+    </script>
+</body>
+</html>
