@@ -67,7 +67,7 @@
         <h2 class="text-accent font-medium tracking-widest uppercase text-sm">Authenticating...</h2>
     </div>
 
-    <!-- Full Screen Auth UI -->
+    <!-- Full Screen Auth UI (Google SSO Only) -->
     <div id="auth-screen" class="hidden fixed inset-0 z-50 flex flex-col md:flex-row bg-white">
         <!-- Logo Side (White Background) -->
         <div class="hidden md:flex md:w-1/2 bg-white flex-col justify-center items-center p-12 text-center relative overflow-hidden border-r border-slate-200">
@@ -78,35 +78,24 @@
         
         <!-- Form Side (Brand Dark Blue Background) -->
         <div class="w-full md:w-1/2 flex flex-col justify-center px-8 sm:px-16 lg:px-24 bg-brand relative">
-            <div class="max-w-md w-full mx-auto">
+            <div class="max-w-md w-full mx-auto text-center">
                 <!-- Mobile Logo -->
                 <div class="md:hidden flex justify-center mb-8 bg-white p-6 rounded-2xl shadow-lg">
                     <img src="https://uvfwmgkqbzujagkpahbd.supabase.co/storage/v1/object/public/Task%20Tracker%20image%20hosting/Task%20Tracker%20(1).svg" alt="Task Tracker Logo" class="h-24 w-auto">
                 </div>
                 
-                <h2 id="auth-title" class="text-3xl font-bold text-white mb-2">Welcome Back</h2>
-                <p id="auth-subtitle" class="text-sm text-slate-300 mb-8">Sign in to manage your tasks</p>
+                <h2 class="text-3xl font-bold text-white mb-3">Welcome</h2>
+                <p class="text-sm text-slate-300 mb-10">Sign in with your Google account to access your tasks.</p>
 
-                <form id="auth-form" onsubmit="handleAuthSubmit(event)" class="space-y-5">
-                    <div>
-                        <label class="block text-xs font-bold text-accent uppercase tracking-wider mb-1.5">Email Address</label>
-                        <input type="email" id="auth-email" required class="w-full px-4 py-3 rounded-lg border border-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent placeholder-slate-400 bg-white/10 text-white transition" placeholder="you@example.com">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-accent uppercase tracking-wider mb-1.5">Password</label>
-                        <input type="password" id="auth-password" required minlength="6" class="w-full px-4 py-3 rounded-lg border border-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent placeholder-slate-400 bg-white/10 text-white transition" placeholder="••••••••">
-                    </div>
-                    
-                    <div id="auth-error" class="hidden text-xs text-rose-200 bg-rose-900/50 p-3 rounded-lg border border-rose-800"></div>
-                    <div id="auth-success" class="hidden text-xs text-emerald-200 bg-emerald-900/50 p-3 rounded-lg border border-emerald-800"></div>
-
-                    <button type="submit" id="auth-submit-btn" class="w-full py-3 bg-accent hover:bg-accent-hover text-brand text-sm font-bold rounded-lg shadow-md transition duration-200 uppercase tracking-wide">Sign In</button>
-                </form>
-
-                <div class="mt-8 text-center text-sm text-slate-300">
-                    <span id="auth-toggle-text">Don't have an account?</span>
-                    <button type="button" onclick="toggleAuthMode()" id="auth-toggle-btn" class="font-bold text-white hover:text-accent ml-1 transition">Sign Up</button>
-                </div>
+                <button onclick="handleGoogleSignIn()" class="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-brand text-sm font-bold rounded-lg shadow-md transition duration-200 flex items-center justify-center gap-3">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                    </svg>
+                    <span>Sign in with Google</span>
+                </button>
             </div>
         </div>
     </div>
@@ -351,7 +340,6 @@
         let draggedTaskId = null;
         let isDraggingTask = false;
         let pendingDeleteTaskId = null;
-        let isSignUpMode = false;
         let currentUser = null;
 
         // Sorting state (false = default order, true = sort by due date)
@@ -360,55 +348,20 @@
         // ==========================================
         // 3. AUTHENTICATION FUNCTIONS
         // ==========================================
-        function toggleAuthMode() {
-            isSignUpMode = !isSignUpMode;
-            document.getElementById('auth-title').innerText = isSignUpMode ? "Create Account" : "Welcome Back";
-            document.getElementById('auth-subtitle').innerText = isSignUpMode ? "Sign up to start organizing tasks" : "Sign in to manage your tasks";
-            document.getElementById('auth-submit-btn').innerText = isSignUpMode ? "Sign Up" : "Sign In";
-            document.getElementById('auth-toggle-text').innerText = isSignUpMode ? "Already have an account?" : "Don't have an account?";
-            document.getElementById('auth-toggle-btn').innerText = isSignUpMode ? "Sign In" : "Sign Up";
-            hideAuthMessages();
-        }
-
-        function hideAuthMessages() {
-            document.getElementById('auth-error').classList.add('hidden');
-            document.getElementById('auth-success').classList.add('hidden');
-        }
-
-        async function handleAuthSubmit(e) {
-            e.preventDefault();
-            hideAuthMessages();
-
-            const email = document.getElementById('auth-email').value.trim();
-            const password = document.getElementById('auth-password').value.trim();
-            const submitBtn = document.getElementById('auth-submit-btn');
-
-            submitBtn.disabled = true;
-            submitBtn.innerText = "Processing...";
-
-            if (isSignUpMode) {
-                const { error } = await supabaseClient.auth.signUp({ email, password });
-                if (error) showAuthError(error.message);
-                else showAuthSuccess("Account created! Check your email to confirm registration or sign in directly.");
-            } else {
-                const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                if (error) showAuthError(error.message);
+        
+        // Triggered by the "Sign in with Google" button
+        async function handleGoogleSignIn() {
+            const { error } = await supabaseClient.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    // Redirects back to your app after Google auth
+                    redirectTo: window.location.origin + window.location.pathname
+                }
+            });
+            
+            if (error) {
+                alert('Error logging in with Google: ' + error.message);
             }
-
-            submitBtn.disabled = false;
-            submitBtn.innerText = isSignUpMode ? "Sign Up" : "Sign In";
-        }
-
-        function showAuthError(msg) {
-            const errEl = document.getElementById('auth-error');
-            errEl.innerText = msg;
-            errEl.classList.remove('hidden');
-        }
-
-        function showAuthSuccess(msg) {
-            const succEl = document.getElementById('auth-success');
-            succEl.innerText = msg;
-            succEl.classList.remove('hidden');
         }
 
         async function handleSignOut() {
